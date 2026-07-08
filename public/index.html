@@ -47,12 +47,19 @@ input{font-family:inherit}
 
 /* ---- auth ---- */
 #auth{position:absolute;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse at 50% 30%,#3a4438 0%,#2a2a28 60%,#1c1a18 100%)}
-#auth .box{width:360px;max-width:92vw;background:rgba(26,24,32,.97);border:1px solid rgba(138,224,92,.3);border-radius:14px;color:#f3e7cd;box-shadow:0 20px 50px rgba(0,0,0,.55);animation:rh-pop .2s ease-out;overflow:hidden}
-#auth .head{background:linear-gradient(180deg,#8bcf5e,#6cb03f);color:#14260c;padding:14px 18px;border-bottom:4px solid #17100a}
+#auth .box{width:460px;max-width:92vw;background:rgba(26,24,32,.97);border:1px solid rgba(138,224,92,.3);border-radius:14px;color:#f3e7cd;box-shadow:0 20px 50px rgba(0,0,0,.55);animation:rh-pop .2s ease-out;overflow:hidden}
+#auth .banner{display:block;width:100%;height:auto;border-bottom:4px solid #17100a}
 #auth .body{padding:18px;display:flex;flex-direction:column;gap:10px}
 #auth input{background:rgba(23,16,10,.6);border:1px solid rgba(243,231,205,.2);border-radius:8px;color:#f3e7cd;padding:10px 12px;font-size:15px;outline:none}
 #auth input:focus{border-color:rgba(138,224,92,.5)}
 #auth .err{color:#ff9a8a;font-size:13px;min-height:16px}
+
+/* ---- chat ---- */
+#chat{position:absolute;left:14px;bottom:64px;z-index:20;width:280px;display:flex;flex-direction:column;gap:6px}
+#chat-log{display:flex;flex-direction:column;gap:2px;font-size:12.5px;line-height:1.35;color:#f3e7cd;text-shadow:0 1px 2px rgba(0,0,0,.85);max-height:160px;overflow:hidden;pointer-events:none;word-break:break-word}
+#chat-log .cm{background:rgba(16,14,20,.55);border-radius:6px;padding:2px 8px;align-self:flex-start}
+#chat-input{background:rgba(20,18,24,.85);border:1px solid rgba(243,231,205,.18);border-radius:8px;color:#f3e7cd;padding:6px 10px;font-size:13px;outline:none;width:100%;box-sizing:border-box}
+#chat-input:focus{border-color:rgba(138,224,92,.5);background:rgba(20,18,24,.95)}
 </style>
 </head>
 <body>
@@ -95,6 +102,12 @@ input{font-family:inherit}
   <!-- player name top-right under minimap -->
   <div id="h-user" style="position:absolute;top:104px;right:14px;z-index:20;color:#c9b896;font-size:12px;font-weight:600;text-shadow:0 1px 2px rgba(0,0,0,.6);text-align:right"></div>
 
+  <!-- chat -->
+  <div id="chat">
+    <div id="chat-log"></div>
+    <input id="chat-input" maxlength="140" placeholder="press Enter to chat…" autocomplete="off">
+  </div>
+
   <!-- energy + run toggle -->
   <div style="position:absolute;bottom:16px;left:14px;z-index:20;display:flex;align-items:center;gap:10px">
     <button id="b-run" class="btn" style="background:rgba(20,18,24,.9);color:#c9d8e8;padding:9px 16px">🚶 RUN OFF</button>
@@ -129,10 +142,7 @@ input{font-family:inherit}
 <!-- auth screen -->
 <div id="auth">
   <div class="box">
-    <div class="head">
-      <div style="font-size:26px;font-weight:700;letter-spacing:1px">ROBBIN' DA HOOD</div>
-      <div style="font-size:13px;font-weight:600;opacity:.8">rob the rich · grow the green · feed the hood</div>
-    </div>
+    <img class="banner" src="./banner.png" alt="Robbin' da Hood — rob the rich, grow the weed, feed the hood">
     <div class="body">
       <div id="a-err" class="err"></div>
       <input id="a-user" placeholder="username" maxlength="20" autocomplete="username">

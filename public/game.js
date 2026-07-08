@@ -16,7 +16,7 @@
   const SEED_COST = 60;
   const HARVEST_YIELD = 3;
   const CYCLE_GOLD_PER_PT = 1;
-  const MUG_BASE = 6, MUG_WEALTH = 44;      // payout = base + wealth*MUG_WEALTH
+  const MUG_BASE = 15, MUG_WEALTH = 120;    // payout = base + wealth*MUG_WEALTH
   const MUG_COOLDOWN = 240000;              // per-suit re-rob cooldown
   const MUG_DROP_CHANCE = 0.04;             // rare item from a mug
   const HEIST_DROP_CHANCE = 0.08;           // rare item from a heist
@@ -56,8 +56,10 @@
       this.lastT = performance.now();
       this.raf = requestAnimationFrame((t) => this.frame(t));
       this.tickIv = setInterval(() => this.tick(), 250);
-      // multiplayer presence
+      // multiplayer presence + chat
       this.remotes = new Map();
+      this.chatLog = [];
+      this.bubble = null; // own speech bubble { txt, until }
       this.connectWs();
       this.posIv = setInterval(() => this.sendPos(), 120);
       // if the cycle expired while offline, settle it now
@@ -90,6 +92,7 @@
           this.g.cheerUntil = Date.now() + 3000;
           this.g.floaters.push({ x: this.SH.x, y: this.SH.y, txt: m.u + ' +' + m.pts + ' PTS', at: Date.now() });
         }
+        else if (m.t === 'chat') this.onChat(m);
       };
       ws.onclose = (ev) => {
         this.setOnline(0);
@@ -121,6 +124,7 @@
         if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) { this.keys[e.code] = true; e.preventDefault(); }
         if (e.code === 'Escape') { this.g.panel = null; this.ui(); }
         if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') { this.g.run = !this.g.run; this.ui(); }
+        if (e.code === 'Enter') { e.preventDefault(); const ci = $('chat-input'); if (ci) ci.focus(); }
       };
       this.onKeyUp = (e) => { this.keys[e.code] = false; };
       this.onResize = () => this.resize();
@@ -147,6 +151,44 @@
       $('modal').addEventListener('click', onAct);
 
       window.addEventListener('visibilitychange', () => { if (document.hidden) this.saveNow(); });
+
+      const ci = $('chat-input');
+      ci.addEventListener('keydown', (e) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') { this.sendChat(); }
+        else if (e.key === 'Escape') { ci.blur(); }
+      });
+    }
+
+    // ============ chat ============
+    sendChat() {
+      const ci = $('chat-input');
+      const txt = ci.value.replace(/\s+/g, ' ').trim().slice(0, 140);
+      ci.value = '';
+      ci.blur();
+      if (!txt) return;
+      if (!this.ws || this.ws.readyState !== 1) return this.fail('Chat is offline — reconnecting…');
+      try { this.ws.send(JSON.stringify({ t: 'chat', txt })); } catch (e) {}
+    }
+    onChat(m) {
+      const now = Date.now();
+      this.chatLog.push({ u: m.u, txt: m.txt, at: now });
+      if (this.chatLog.length > 50) this.chatLog.shift();
+      this.renderChatLog();
+      // speech bubble over the speaker for 7 seconds
+      const bub = { txt: m.txt, until: now + 7000 };
+      if (m.u === this.profile.username) this.bubble = bub;
+      else {
+        const r = this.remotes.get(m.u);
+        if (r) r.bubble = bub;
+      }
+    }
+    renderChatLog() {
+      const log = $('chat-log');
+      if (!log) return;
+      log.innerHTML = this.chatLog.slice(-8).map(c =>
+        '<div class="cm"><b style="color:' + (c.u === this.profile.username ? '#8ae05c' : '#5fb4d8') + '">' + esc(c.u) + ':</b> ' + esc(c.txt) + '</div>'
+      ).join('');
     }
 
     togglePanel(p) {
@@ -255,22 +297,22 @@
         if (Math.hypot(bx - SH.x, by - SH.y) < 7) continue;
         if (w > 0.8) {
           objs.push({ t: 'bank', x: spots[0][0], y: spots[0][1], label: 'FIRST NATIONAL' });
-          robs.push({ t: 'bank', x: spots[0][0], y: spots[0][1], name: 'First National Bank', dur: 9000, pay: [120, 220], heat: 60, cd: 0 });
+          robs.push({ t: 'bank', x: spots[0][0], y: spots[0][1], name: 'First National Bank', dur: 9000, pay: [700, 1000], heat: 60, cd: 0 });
           objs.push({ t: 'mansion', x: spots[1][0], y: spots[1][1] });
-          robs.push({ t: 'mansion', x: spots[1][0], y: spots[1][1], name: 'Mansion', dur: 7000, pay: [90, 160], heat: 45, cd: 0 });
+          robs.push({ t: 'mansion', x: spots[1][0], y: spots[1][1], name: 'Mansion', dur: 7000, pay: [350, 550], heat: 45, cd: 0 });
           objs.push({ t: 'fountain', x: spots[2][0], y: spots[2][1] });
           objs.push({ t: 'hedge', x: spots[3][0], y: spots[3][1] });
         } else if (w > 0.62) {
-          if (rnd < 0.5) { objs.push({ t: 'jewel', x: spots[0][0], y: spots[0][1], label: 'DIAMONDS' }); robs.push({ t: 'jewel', x: spots[0][0], y: spots[0][1], name: 'Jewelry Store', dur: 6000, pay: [70, 130], heat: 40, cd: 0 }); }
-          else { objs.push({ t: 'bank', x: spots[0][0], y: spots[0][1], label: 'CREDIT UNION' }); robs.push({ t: 'bank', x: spots[0][0], y: spots[0][1], name: 'Credit Union', dur: 8000, pay: [100, 180], heat: 55, cd: 0 }); }
+          if (rnd < 0.5) { objs.push({ t: 'jewel', x: spots[0][0], y: spots[0][1], label: 'DIAMONDS' }); robs.push({ t: 'jewel', x: spots[0][0], y: spots[0][1], name: 'Jewelry Store', dur: 6000, pay: [600, 800], heat: 40, cd: 0 }); }
+          else { objs.push({ t: 'bank', x: spots[0][0], y: spots[0][1], label: 'CREDIT UNION' }); robs.push({ t: 'bank', x: spots[0][0], y: spots[0][1], name: 'Credit Union', dur: 8000, pay: [500, 800], heat: 55, cd: 0 }); }
           objs.push({ t: 'mansion', x: spots[1][0], y: spots[1][1] });
-          robs.push({ t: 'mansion', x: spots[1][0], y: spots[1][1], name: 'Mansion', dur: 7000, pay: [90, 160], heat: 45, cd: 0 });
+          robs.push({ t: 'mansion', x: spots[1][0], y: spots[1][1], name: 'Mansion', dur: 7000, pay: [350, 550], heat: 45, cd: 0 });
           objs.push({ t: 'hedge', x: spots[2][0], y: spots[2][1] });
           objs.push({ t: 'lamp', x: spots[3][0], y: spots[3][1] });
         } else if (w > 0.44) {
           objs.push({ t: 'store', x: spots[0][0], y: spots[0][1], label: 'QUICK MART' });
-          robs.push({ t: 'store', x: spots[0][0], y: spots[0][1], name: 'Quick Mart', dur: 4000, pay: [30, 60], heat: 25, cd: 0 });
-          if (rnd < 0.5) { objs.push({ t: 'store', x: spots[1][0], y: spots[1][1], label: 'LIQUOR' }); robs.push({ t: 'store', x: spots[1][0], y: spots[1][1], name: 'Liquor Store', dur: 4000, pay: [35, 65], heat: 25, cd: 0 }); }
+          robs.push({ t: 'store', x: spots[0][0], y: spots[0][1], name: 'Quick Mart', dur: 4000, pay: [150, 250], heat: 25, cd: 0 });
+          if (rnd < 0.5) { objs.push({ t: 'store', x: spots[1][0], y: spots[1][1], label: 'LIQUOR' }); robs.push({ t: 'store', x: spots[1][0], y: spots[1][1], name: 'Liquor Store', dur: 4000, pay: [160, 260], heat: 25, cd: 0 }); }
           objs.push({ t: 'lamp', x: spots[2][0], y: spots[2][1] });
           objs.push({ t: 'trash', x: spots[3][0], y: spots[3][1] });
         } else {
@@ -722,6 +764,29 @@
       }
       list.sort((a, b) => a.d - b.d);
       for (const it of list) ART.drawObj(ctx, isoF, it.o, { t });
+      // lockdown cooldown bars over robbed buildings
+      for (const r of this.robs) {
+        if (r.cd <= now || !seen(r)) continue;
+        const frac = Math.max(0, Math.min(1, (r.cd - now) / HEIST_COOLDOWN));
+        const s = this.iso(r.x, r.y);
+        const bw = 46, bx = s.x - bw / 2, by = s.y - 66;
+        ctx.fillStyle = 'rgba(16,14,20,.85)';
+        ctx.fillRect(bx - 3, by - 3, bw + 6, 13);
+        ctx.fillStyle = '#17100a'; ctx.fillRect(bx, by, bw, 7);
+        ctx.fillStyle = '#e8763d'; ctx.fillRect(bx, by, bw * frac, 7);
+        ctx.font = "700 9px 'Pixelify Sans', monospace"; ctx.textAlign = 'center';
+        ctx.fillStyle = '#ff9a8a';
+        const cdS = Math.ceil((r.cd - now) / 1000);
+        ctx.fillText('LOCKDOWN ' + (cdS >= 60 ? Math.ceil(cdS / 60) + 'm' : cdS + 's'), s.x, by - 6);
+        ctx.textAlign = 'left';
+      }
+      // speech bubbles (drawn above everything in world space)
+      if (this.bubble && this.bubble.until > now) this.drawBubble(ctx, g.player.x, g.player.y, this.bubble.txt);
+      else this.bubble = null;
+      for (const r of this.remotes.values()) {
+        if (r.bubble && r.bubble.until > now) this.drawBubble(ctx, r.x, r.y, r.bubble.txt);
+        else r.bubble = null;
+      }
       for (const f of g.floaters) {
         const el = (now - f.at) / 2200;
         const s = this.iso(f.x, f.y);
@@ -771,6 +836,46 @@
         $('h-heisttxt').textContent = 'Robbing ' + g.heist.rob.name + '… stay put!';
         $('h-heistbar').style.width = Math.min(100, Math.round((now - g.heist.start) / g.heist.rob.dur * 100)) + '%';
       } else heistEl.classList.add('hidden');
+    }
+    drawBubble(ctx, wx, wy, txt) {
+      const s = this.iso(wx, wy);
+      ctx.font = "600 12px 'Pixelify Sans', monospace";
+      // word-wrap to ~150px, max 3 lines
+      const words = txt.split(' ');
+      const lines = [];
+      let line = '';
+      for (const w of words) {
+        const test = line ? line + ' ' + w : w;
+        if (ctx.measureText(test).width > 150 && line) { lines.push(line); line = w; }
+        else line = test;
+        if (lines.length === 3) break;
+      }
+      if (lines.length < 3 && line) lines.push(line);
+      else if (lines.length === 3 && line) lines[2] = lines[2].slice(0, 18) + '…';
+      let bw = 0;
+      for (const l of lines) bw = Math.max(bw, ctx.measureText(l).width);
+      bw += 18;
+      const bh = lines.length * 15 + 10;
+      const bx = s.x - bw / 2, by = s.y - 62 - bh;
+      // bubble body
+      ctx.fillStyle = '#f3e7cd';
+      ctx.strokeStyle = '#17100a'; ctx.lineWidth = 2;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(bx, by, bw, bh, 7);
+      else ctx.rect(bx, by, bw, bh);
+      ctx.fill(); ctx.stroke();
+      // tail
+      ctx.beginPath();
+      ctx.moveTo(s.x - 5, by + bh - 1); ctx.lineTo(s.x + 6, by + bh - 1); ctx.lineTo(s.x + 1, by + bh + 8);
+      ctx.closePath();
+      ctx.fillStyle = '#f3e7cd'; ctx.fill();
+      ctx.strokeStyle = '#17100a'; ctx.stroke();
+      ctx.fillStyle = '#f3e7cd';
+      ctx.fillRect(s.x - 4, by + bh - 2.5, 9, 3); // hide tail seam
+      // text
+      ctx.fillStyle = '#17100a'; ctx.textAlign = 'center';
+      lines.forEach((l, i) => ctx.fillText(l, s.x, by + 17 + i * 15));
+      ctx.textAlign = 'left';
     }
     drawMinimap(ctx, cw) {
       const MW = 148, MH = 82;

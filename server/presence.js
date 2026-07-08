@@ -8,6 +8,13 @@ const players = new Map(); // user_id -> { ws, id, username, x, y, run, moving, 
 function initPresence(server, sessionByToken) {
   const wss = new WebSocketServer({ server, path: '/ws' });
 
+  function broadcastAll(obj) {
+    const msg = JSON.stringify(obj);
+    for (const p of players.values()) {
+      if (p.ws.readyState === 1) { try { p.ws.send(msg); } catch (e) {} }
+    }
+  }
+
   wss.on('connection', (ws, req) => {
     let sess = null;
     try {
@@ -32,6 +39,14 @@ function initPresence(server, sessionByToken) {
         if (Number.isFinite(x) && Number.isFinite(y) && x >= 0 && x <= 80 && y >= 0 && y <= 80) {
           p.x = x; p.y = y; p.run = !!m.run; p.moving = !!m.moving; p.at = Date.now();
         }
+      }
+      else if (m.t === 'chat') {
+        const txt = String(m.txt || '').replace(/\s+/g, ' ').trim().slice(0, 140);
+        if (!txt) return;
+        const now = Date.now();
+        if (p.lastChat && now - p.lastChat < 800) return; // anti-spam
+        p.lastChat = now;
+        broadcastAll({ t: 'chat', u: p.username, txt });
       }
     });
     ws.on('close', () => {
@@ -59,12 +74,7 @@ function initPresence(server, sessionByToken) {
 
   return {
     // let HTTP routes push events to everyone (e.g. shelter provides)
-    broadcast(obj) {
-      const msg = JSON.stringify(obj);
-      for (const p of players.values()) {
-        if (p.ws.readyState === 1) { try { p.ws.send(msg); } catch (e) {} }
-      }
-    },
+    broadcast: broadcastAll,
     onlineCount() { return players.size; }
   };
 }
