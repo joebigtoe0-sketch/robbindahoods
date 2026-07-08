@@ -56,8 +56,63 @@
       this.lastT = performance.now();
       this.raf = requestAnimationFrame((t) => this.frame(t));
       this.tickIv = setInterval(() => this.tick(), 250);
+      // multiplayer presence
+      this.remotes = new Map();
+      this.connectWs();
+      this.posIv = setInterval(() => this.sendPos(), 120);
       // if the cycle expired while offline, settle it now
       if (Date.now() >= this.g.cycleEnd) this.endCycle();
+    }
+
+    // ============ multiplayer ============
+    connectWs() {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      let ws;
+      try { ws = new WebSocket(proto + '://' + location.host + '/ws?token=' + encodeURIComponent(RHApi.token() || '')); }
+      catch (e) { this.wsRetry(); return; }
+      this.ws = ws;
+      ws.onopen = () => this.setOnline(1);
+      ws.onmessage = (ev) => {
+        let m;
+        try { m = JSON.parse(ev.data); } catch (e) { return; }
+        if (m.t === 'players') {
+          const seen = new Set();
+          for (const p of m.list) {
+            if (p.u === this.profile.username) { this.setOnline(m.list.length); continue; }
+            seen.add(p.u);
+            const r = this.remotes.get(p.u);
+            if (r) { r.tx = p.x; r.ty = p.y; r.run = !!p.r; r.moving = !!p.m; }
+            else this.remotes.set(p.u, { u: p.u, x: p.x, y: p.y, tx: p.x, ty: p.y, run: !!p.r, moving: !!p.m, ph: Math.random() * 6 });
+          }
+          for (const key of [...this.remotes.keys()]) if (!seen.has(key)) this.remotes.delete(key);
+        }
+        else if (m.t === 'provide' && m.u !== this.profile.username) {
+          this.g.cheerUntil = Date.now() + 3000;
+          this.g.floaters.push({ x: this.SH.x, y: this.SH.y, txt: m.u + ' +' + m.pts + ' PTS', at: Date.now() });
+        }
+      };
+      ws.onclose = (ev) => {
+        this.setOnline(0);
+        if (ev.code === 4001) return this.onLoggedOut();
+        if (ev.code === 4002) return; // opened the game in another tab — let that one win
+        this.wsRetry();
+      };
+      ws.onerror = () => {};
+    }
+    wsRetry() {
+      clearTimeout(this._wsT);
+      this._wsT = setTimeout(() => this.connectWs(), 3000);
+    }
+    sendPos() {
+      if (!this.ws || this.ws.readyState !== 1) return;
+      const g = this.g;
+      try { this.ws.send(JSON.stringify({ t: 'pos', x: +g.player.x.toFixed(2), y: +g.player.y.toFixed(2), run: g.run && !!this._pmoving, moving: !!this._pmoving })); } catch (e) {}
+    }
+    setOnline(n) {
+      const dot = $('h-online-dot'), txt = $('h-online');
+      if (!dot || !txt) return;
+      if (n > 0) { dot.style.background = '#8ae05c'; txt.textContent = n + ' in the hood'; }
+      else { dot.style.background = '#8f7f63'; txt.textContent = 'reconnecting…'; }
     }
 
     bindEvents() {
@@ -538,6 +593,16 @@
         const f = Math.min(1, 4 * dt);
         this.cam.x += (p.x - this.cam.x) * f; this.cam.y += (p.y - this.cam.y) * f;
       }
+      // remote players glide toward their reported position
+      for (const r of this.remotes.values()) {
+        const d = Math.hypot(r.tx - r.x, r.ty - r.y);
+        if (d > 12) { r.x = r.tx; r.y = r.ty; } // teleport on big jumps (bust, respawn)
+        else if (d > 0.03) {
+          const f = Math.min(1, 9 * dt);
+          r.x += (r.tx - r.x) * f; r.y += (r.ty - r.y) * f;
+        }
+        if (r.moving) r.ph = (r.ph || 0) + dt * (r.run ? 14 : 11);
+      }
       // suits wander / flee
       for (const n of this.suits) {
         const fleeing = n.flee > now;
@@ -644,6 +709,11 @@
         if (!seen(cr)) continue;
         list.push({ d: cr.x + cr.y, o: { t: 'person', kind: 'hood', x: cr.x, y: cr.y, skin: cr.skin, top: cr.top, seed: cr.seed, cheer: cheering, zzz: !cheering && cr.zzz } });
       }
+      // other players
+      for (const r of this.remotes.values()) {
+        if (!seen(r)) continue;
+        list.push({ d: r.x + r.y, o: { t: 'person', kind: 'player', x: r.x, y: r.y, ph: r.ph || 0, moving: !!r.moving, run: !!r.run, label: r.u, labelColor: '#5fb4d8' } });
+      }
       list.push({ d: g.player.x + g.player.y, o: { t: 'person', kind: 'player', x: g.player.x, y: g.player.y, ph: this._pph || 0, moving: !!this._pmoving, run: g.run && this._pmoving, label: this.profile.username, labelColor: '#8ae05c' } });
       if (g.moveTarget) {
         const s = this.iso(g.moveTarget.x, g.moveTarget.y);
@@ -729,6 +799,7 @@
       dot(this.SH.x, this.SH.y, '#e86a8a', 3);
       if (this.g.house) { const h = this.houses[this.g.house.id]; dot(h.x, h.y, '#8ae05c', 2.5); }
       for (const c of this.cops) dot(c.x, c.y, c.chase ? '#ff5a4a' : '#5a8ae8', 1.8);
+      for (const r of this.remotes.values()) dot(r.x, r.y, '#5fb4d8', 2);
       dot(this.g.player.x, this.g.player.y, '#f3e7cd', 2.6);
       ctx.font = "600 9px 'Pixelify Sans', monospace";
       ctx.fillStyle = '#8f7f63';

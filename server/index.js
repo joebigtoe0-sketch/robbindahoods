@@ -1,8 +1,10 @@
 const path = require('path');
 const crypto = require('crypto');
+const http = require('http');
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const db = require('./db');
+const { initPresence } = require('./presence');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -122,6 +124,7 @@ app.post('/api/provide', auth, (req, res) => {
   pts = Math.floor(Number(pts));
   if (!Number.isFinite(pts) || pts <= 0 || pts > 2000) return res.status(400).json({ error: 'Bad points' });
   stmt.addPoints.run(pts, req.user.id);
+  presence.broadcast({ t: 'provide', u: req.user.username, pts });
   res.json({ ok: true });
 });
 
@@ -138,8 +141,11 @@ app.get('/api/leaderboard', (req, res) => {
   res.json({ rows: stmt.leaderboard.all() });
 });
 
-app.get('/api/health', (req, res) => res.json({ ok: true }));
+app.get('/api/health', (req, res) => res.json({ ok: true, online: presence.onlineCount() }));
 
-app.listen(PORT, () => {
+const server = http.createServer(app);
+const presence = initPresence(server, stmt.sessionByToken);
+
+server.listen(PORT, () => {
   console.log(`Robbin da Hood server listening on :${PORT}`);
 });

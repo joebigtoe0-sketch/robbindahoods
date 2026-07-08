@@ -1,6 +1,6 @@
 # Robbin da Hood
 
-Rob the rich · grow the green · feed the hood. Isometric browser game with accounts, cloud saves and a global leaderboard.
+Rob the rich · grow the green · feed the hood. Isometric multiplayer browser game with accounts, cloud saves and a global leaderboard. Everyone online shares the same streets — you see each other moving in real time (WebSocket presence), and the whole block celebrates when anyone provides at the shelter.
 
 No token gate. Register with username + password, log in, play. Optionally add a wallet address in Profile — it shows next to your name on the leaderboard.
 
