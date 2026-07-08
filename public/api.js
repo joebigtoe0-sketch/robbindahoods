@@ -31,6 +31,7 @@
     saveState: (state) => call('PUT', '/api/state', { state }),
     provide: (pts) => call('POST', '/api/provide', { pts }),
     reportCycle: (pts) => call('POST', '/api/cycle', { pts }),
-    leaderboard: () => call('GET', '/api/leaderboard')
+    leaderboard: () => call('GET', '/api/leaderboard'),
+    adminReset: () => call('POST', '/api/admin/reset')
   };
 })();

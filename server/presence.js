@@ -1,9 +1,11 @@
-/* Real-time multiplayer presence over WebSocket.
+/* Real-time multiplayer presence + chat over WebSocket.
    Clients connect to /ws?token=<session token>, stream their position,
-   and receive ~7 Hz snapshots of everyone online. */
+   and receive ~7 Hz snapshots of everyone online. Connections are keyed
+   per-socket (not per-account) so a second tab never kills the first. */
 const { WebSocketServer } = require('ws');
 
-const players = new Map(); // user_id -> { ws, id, username, x, y, run, moving, at }
+const players = new Map(); // connId -> { ws, connId, userId, username, x, y, run, moving, at }
+let connSeq = 0;
 
 function initPresence(server, sessionByToken) {
   const wss = new WebSocketServer({ server, path: '/ws' });
@@ -24,12 +26,8 @@ function initPresence(server, sessionByToken) {
     } catch (e) {}
     if (!sess) { ws.close(4001, 'unauthorized'); return; }
 
-    // one live connection per account — newest wins
-    const prev = players.get(sess.user_id);
-    if (prev) { try { prev.ws.close(4002, 'replaced'); } catch (e) {} }
-
-    const p = { ws, id: sess.user_id, username: sess.username, x: 16, y: 62, run: false, moving: false, at: Date.now() };
-    players.set(sess.user_id, p);
+    const p = { ws, connId: ++connSeq, userId: sess.user_id, username: sess.username, x: 16, y: 62, run: false, moving: false, at: Date.now() };
+    players.set(p.connId, p);
 
     ws.on('message', (buf) => {
       let m;
@@ -49,22 +47,17 @@ function initPresence(server, sessionByToken) {
         broadcastAll({ t: 'chat', u: p.username, txt });
       }
     });
-    ws.on('close', () => {
-      const cur = players.get(sess.user_id);
-      if (cur && cur.ws === ws) players.delete(sess.user_id);
-    });
+    ws.on('close', () => players.delete(p.connId));
     ws.on('error', () => {});
   });
 
   // snapshot broadcast loop
   setInterval(() => {
     if (!players.size) return;
-    const now = Date.now();
     const list = [];
-    for (const [id, p] of players) {
+    for (const p of players.values()) {
       if (p.ws.readyState !== 1) continue;
-      if (now - p.at > 60000 && !p.moving) { /* idle is fine, keep showing them */ }
-      list.push({ id, u: p.username, x: +p.x.toFixed(2), y: +p.y.toFixed(2), r: p.run ? 1 : 0, m: p.moving ? 1 : 0 });
+      list.push({ u: p.username, x: +p.x.toFixed(2), y: +p.y.toFixed(2), r: p.run ? 1 : 0, m: p.moving ? 1 : 0 });
     }
     const msg = JSON.stringify({ t: 'players', list });
     for (const p of players.values()) {
@@ -73,9 +66,9 @@ function initPresence(server, sessionByToken) {
   }, 150);
 
   return {
-    // let HTTP routes push events to everyone (e.g. shelter provides)
+    // let HTTP routes push events to everyone (e.g. shelter provides, admin reset)
     broadcast: broadcastAll,
-    onlineCount() { return players.size; }
+    onlineCount() { return new Set([...players.values()].map(p => p.username)).size; }
   };
 }
 

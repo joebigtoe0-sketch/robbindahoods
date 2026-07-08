@@ -73,31 +73,45 @@
       try { ws = new WebSocket(proto + '://' + location.host + '/ws?token=' + encodeURIComponent(RHApi.token() || '')); }
       catch (e) { this.wsRetry(); return; }
       this.ws = ws;
-      ws.onopen = () => this.setOnline(1);
+      ws.onopen = () => {
+        this.setOnline(1);
+        // flush anything typed while we were reconnecting
+        const box = this._chatOutbox || [];
+        this._chatOutbox = [];
+        for (const txt of box) { try { ws.send(JSON.stringify({ t: 'chat', txt })); } catch (e) {} }
+      };
       ws.onmessage = (ev) => {
         let m;
         try { m = JSON.parse(ev.data); } catch (e) { return; }
         if (m.t === 'players') {
           const seen = new Set();
           for (const p of m.list) {
-            if (p.u === this.profile.username) { this.setOnline(m.list.length); continue; }
+            if (p.u === this.profile.username) continue;
             seen.add(p.u);
             const r = this.remotes.get(p.u);
             if (r) { r.tx = p.x; r.ty = p.y; r.run = !!p.r; r.moving = !!p.m; }
             else this.remotes.set(p.u, { u: p.u, x: p.x, y: p.y, tx: p.x, ty: p.y, run: !!p.r, moving: !!p.m, ph: Math.random() * 6 });
           }
           for (const key of [...this.remotes.keys()]) if (!seen.has(key)) this.remotes.delete(key);
+          this.setOnline(new Set(m.list.map(p => p.u)).size);
         }
         else if (m.t === 'provide' && m.u !== this.profile.username) {
           this.g.cheerUntil = Date.now() + 3000;
           this.g.floaters.push({ x: this.SH.x, y: this.SH.y, txt: m.u + ' +' + m.pts + ' PTS', at: Date.now() });
         }
         else if (m.t === 'chat') this.onChat(m);
+        else if (m.t === 'reset') {
+          // admin wiped the game — stop saving stale state and start over
+          this._resetting = true;
+          clearTimeout(this._saveT);
+          RHApi.setToken(null);
+          location.reload();
+        }
       };
       ws.onclose = (ev) => {
         this.setOnline(0);
+        if (this._resetting) return;
         if (ev.code === 4001) return this.onLoggedOut();
-        if (ev.code === 4002) return; // opened the game in another tab — let that one win
         this.wsRetry();
       };
       ws.onerror = () => {};
@@ -139,6 +153,11 @@
       $('b-board').onclick = () => this.togglePanel('board');
       $('b-profile').onclick = () => this.togglePanel('profile');
       $('b-help').onclick = () => this.togglePanel('help');
+      if (this.profile.isAdmin) {
+        const rb = $('b-reset');
+        rb.classList.remove('hidden');
+        rb.onclick = () => this.adminReset();
+      }
 
       // event delegation for panel + modal actions
       const onAct = (e) => {
@@ -164,11 +183,20 @@
     sendChat() {
       const ci = $('chat-input');
       const txt = ci.value.replace(/\s+/g, ' ').trim().slice(0, 140);
+      if (!txt) { ci.value = ''; ci.blur(); return; }
+      const nowT = Date.now();
+      if (this._lastChatSend && nowT - this._lastChatSend < 900) return this.fail('Easy — one message a second.');
+      this._lastChatSend = nowT;
       ci.value = '';
       ci.blur();
-      if (!txt) return;
-      if (!this.ws || this.ws.readyState !== 1) return this.fail('Chat is offline — reconnecting…');
-      try { this.ws.send(JSON.stringify({ t: 'chat', txt })); } catch (e) {}
+      if (this.ws && this.ws.readyState === 1) {
+        try { this.ws.send(JSON.stringify({ t: 'chat', txt })); return; } catch (e) {}
+      }
+      // connection is down: queue the message and reconnect now
+      this._chatOutbox = (this._chatOutbox || []).slice(-2);
+      this._chatOutbox.push(txt);
+      this.toast('Reconnecting chat… message will send shortly');
+      if (!this.ws || this.ws.readyState >= 2) { clearTimeout(this._wsT); this.connectWs(); }
     }
     onChat(m) {
       const now = Date.now();
@@ -249,6 +277,7 @@
       this._saveT = setTimeout(() => this.saveNow(), 2500);
     }
     saveNow() {
+      if (this._resetting) return;
       clearTimeout(this._saveT);
       RHApi.saveState(this.savePayload()).catch((e) => {
         if (e.status === 401) this.onLoggedOut();
@@ -1026,6 +1055,20 @@
         this.fail(e.message);
       }
     }
+    async adminReset() {
+      const sure = confirm('☠ RESET THE ENTIRE GAME?\n\nEVERY player loses their house, gold, weed, points and leaderboard score. Cycle goes back to 1. Accounts and wallets stay. Everyone gets logged out.\n\nThis cannot be undone.');
+      if (!sure) return;
+      this._resetting = true;
+      clearTimeout(this._saveT);
+      try {
+        await RHApi.adminReset();
+        // server broadcasts the reset; if our socket misses it, reload anyway
+        setTimeout(() => { RHApi.setToken(null); location.reload(); }, 1500);
+      } catch (e) {
+        this._resetting = false;
+        this.fail(e.message);
+      }
+    }
     async logout() {
       this.saveNow();
       try { await RHApi.logout(); } catch (e) {}
@@ -1237,7 +1280,7 @@
     try {
       const res = mode === 'login' ? await RHApi.login(username, password) : await RHApi.register(username, password);
       RHApi.setToken(res.token);
-      await startGame({ username: res.username, wallet: res.wallet || '' });
+      await startGame({ username: res.username, wallet: res.wallet || '', isAdmin: !!res.isAdmin });
     } catch (e) {
       aErr.textContent = e.message;
     }
@@ -1249,7 +1292,7 @@
 
   // auto-login with stored session
   if (RHApi.token()) {
-    RHApi.me().then((me) => startGame({ username: me.username, wallet: me.wallet || '' }))
+    RHApi.me().then((me) => startGame({ username: me.username, wallet: me.wallet || '', isAdmin: !!me.isAdmin }))
       .catch(() => { RHApi.setToken(null); });
   }
 })();

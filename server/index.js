@@ -26,8 +26,17 @@ const stmt = {
   getSave: db.prepare('SELECT data FROM saves WHERE user_id = ?'),
   addPoints: db.prepare('UPDATE users SET total_points = total_points + ? WHERE id = ?'),
   bestCycle: db.prepare('UPDATE users SET best_cycle_pts = MAX(best_cycle_pts, ?) WHERE id = ?'),
-  leaderboard: db.prepare('SELECT username, wallet, total_points, best_cycle_pts FROM users ORDER BY total_points DESC, username ASC LIMIT 50')
+  leaderboard: db.prepare('SELECT username, wallet, total_points, best_cycle_pts FROM users ORDER BY total_points DESC, username ASC LIMIT 50'),
+  setAdmin: db.prepare('UPDATE users SET is_admin = 1 WHERE username = ?'),
+  wipeSaves: db.prepare('DELETE FROM saves'),
+  wipeSessions: db.prepare('DELETE FROM sessions'),
+  wipeScores: db.prepare('UPDATE users SET total_points = 0, best_cycle_pts = 0')
 };
+
+// accounts listed here are admins (auto-flagged on register/login too)
+const ADMIN_USERS = (process.env.ADMIN_USERS || 'DEV').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+const isAdminName = (name) => ADMIN_USERS.includes(String(name).toLowerCase());
+for (const name of ADMIN_USERS) stmt.setAdmin.run(name);
 
 function auth(req, res, next) {
   const h = req.headers.authorization || '';
@@ -70,8 +79,9 @@ app.post('/api/register', (req, res) => {
     return res.status(409).json({ error: 'Username already taken' });
   const hash = bcrypt.hashSync(password, 10);
   const info = stmt.insertUser.run(username, hash, Date.now());
+  if (isAdminName(username)) stmt.setAdmin.run(username);
   const token = makeSession(info.lastInsertRowid);
-  res.json({ token, username, wallet: '' });
+  res.json({ token, username, wallet: '', isAdmin: isAdminName(username) });
 });
 
 app.post('/api/login', (req, res) => {
@@ -80,8 +90,9 @@ app.post('/api/login', (req, res) => {
   const user = typeof username === 'string' ? stmt.userByName.get(username) : null;
   if (!user || typeof password !== 'string' || !bcrypt.compareSync(password, user.pass_hash))
     return res.status(401).json({ error: 'Wrong username or password' });
+  if (isAdminName(user.username) && !user.is_admin) stmt.setAdmin.run(user.username);
   const token = makeSession(user.id);
-  res.json({ token, username: user.username, wallet: user.wallet || '' });
+  res.json({ token, username: user.username, wallet: user.wallet || '', isAdmin: !!user.is_admin || isAdminName(user.username) });
 });
 
 app.post('/api/logout', auth, (req, res) => {
@@ -90,7 +101,22 @@ app.post('/api/logout', auth, (req, res) => {
 });
 
 app.get('/api/me', auth, (req, res) => {
-  res.json({ username: req.user.username, wallet: req.user.wallet || '' });
+  const u = stmt.userById.get(req.user.id);
+  res.json({ username: req.user.username, wallet: req.user.wallet || '', isAdmin: !!(u && u.is_admin) });
+});
+
+// ---------- admin ----------
+app.post('/api/admin/reset', auth, (req, res) => {
+  const u = stmt.userById.get(req.user.id);
+  if (!u || !u.is_admin) return res.status(403).json({ error: 'Admins only' });
+  db.transaction(() => {
+    stmt.wipeSaves.run();
+    stmt.wipeScores.run();
+    stmt.wipeSessions.run(); // force everyone (incl. admin) to log in fresh
+  })();
+  presence.broadcast({ t: 'reset' });
+  console.log(`[admin] full game reset by ${u.username}`);
+  res.json({ ok: true });
 });
 
 // ---------- profile ----------

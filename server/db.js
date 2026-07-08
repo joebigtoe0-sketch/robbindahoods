@@ -31,4 +31,10 @@ CREATE TABLE IF NOT EXISTS saves (
 CREATE INDEX IF NOT EXISTS idx_users_points ON users(total_points DESC);
 `);
 
+// migration: admin flag
+const userCols = db.prepare('PRAGMA table_info(users)').all();
+if (!userCols.some(c => c.name === 'is_admin')) {
+  db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0');
+}
+
 module.exports = db;
